@@ -73,11 +73,11 @@ init_board([
 /* MODIFY THE CODE SO THAT playerA AND playerB AUTO-COMPETE */
 /* ----------------------------------------------------------------------- */
 play(Board) :-
-    % Player A (white) moves automatically
+    % playerA (white) moves automatically
     execute_command(playerA, Board, NewBoard),
-    % Player B (black) moves automatically
+    % playerB (black) moves automatically
     execute_command(playerB, NewBoard, NextNewBoard),
-    % Continue until checkmate/stalemate (finish_move aborts)
+    % loop until finish_move/6 aborts on checkmate/stalemate
     play(NextNewBoard).
 
 
@@ -98,7 +98,7 @@ execute_command(Move, Board, NewBoard) :-
 execute_command(Player, Board, NewBoard) :-
     respond_to(Player, Board, NewBoard), !.
 
-execute_command(X, Board, _) :-     % Use to catch unexpected situations
+execute_command(_, _, _) :-     % Use to catch unexpected situations
     write('What?'),
     halt(0).
 
@@ -126,11 +126,10 @@ strengthA([], _, _, Rand) :-
 /* MIMIC THE CODE FOR playerB */
 /* ----------------------------------------------------------------------- */
 
-% Search depth for alpha-beta for playerA (white)
-ply_depthA(3).          % similar depth as ply_depthB
+ply_depthA(3).          % Depth of alpha-beta search for playerA
 
-% Piece values for playerA (same scale as playerB)
-% Ensure the sum of all pieces is << 32000
+% Define the utility function for playerA
+% MAKE SURE that the SUM of all pieces is smaller than 32000
 valueA(king,  10000) :- !.
 valueA(queen,   900) :- !.
 valueA(rook,    500) :- !.
@@ -138,37 +137,43 @@ valueA(knight,  300) :- !.
 valueA(bishop,  300) :- !.
 valueA(pawn,    100) :- !.
 
-% Strength function for playerA (white), mirroring strengthB
+% Strength assesses utility of the current game state for playerA
 strengthA([state(_, _, _, _)|Board], Color, OppositeColor, Strength) :-
     strengthA(Board, Color, OppositeColor, Strength), !.
 strengthA([piece(_, Color, Type)|Board], Color, OppositeColor, Strength) :-
     valueA(Type, Value),
-    strengthA(Board, Color, OppositeColor, Partial),
-    Strength is Partial + Value, !.
-strengthA([piece(_, OppositeColor, Type)|Board], Color, OppositeColor, Strength) :-
+    strengthA(Board, Color, OppositeColor, PartialStrength),
+    Strength is PartialStrength + Value, !.
+strengthA([piece(_, OppositeColor, Type)|Board], Color, OppositeColor,
+      Strength) :-
     valueA(Type, Value),
-    strengthA(Board, Color, OppositeColor, Partial),
-    Strength is Partial - Value.
+    strengthA(Board, Color, OppositeColor, PartialStrength),
+    Strength is PartialStrength - Value.
 
-% Collect moves for playerA (white)
+% Code to collect moves given the current state Board for playerA
+% If Moves is empty, it should return FAIL.
 collect_movesA(Board, Color, Moves) :-
-    bagof(move(From, To), Piece^move(Board, From, To, Color, Piece), Moves).
+    bagof(move(From, To), Piece^move(Board,From,To,Color,Piece), Moves).
 
-% Alpha-beta pruning helper for playerA (mirrors sufficientB)
-sufficientA(Player, _Board, Turn, [], _Depth, _Alpha, _Beta, Move, Val, Move, Val) :- !.
-sufficientA(Player, _Board, Turn, _Moves, _Depth, Alpha, _Beta, Move, Val, Move, Val) :-
-    Player \== Turn,        % Opponent is minimizing
-    Val < Alpha, !.         % Prune branch
-sufficientA(Player, _Board, Turn, _Moves, _Depth, _Alpha, Beta, Move, Val, Move, Val) :-
-    Player = Turn,          % Player is maximizing
-    Val > Beta, !.          % Prune branch
-sufficientA(Player, Board, Turn, Moves, Depth, Alpha, Beta, Move, Val,
-            BestMove, BestVal) :-
+% Alpha-beta pruning helpers for playerA (mirror sufficientB)
+sufficientA(Player, _Board, _Turn, [], _Depth, _Alpha, _Beta,
+            Move, Val, Move, Val) :- !.
+sufficientA(Player, _Board, Turn, _Moves, _Depth, Alpha, _Beta,
+            Move, Val, Move, Val) :-
+    Player \== Turn,        % MIN node
+    Val < Alpha, !.         % prune
+sufficientA(Player, _Board, Turn, _Moves, _Depth, _Alpha, Beta,
+            Move, Val, Move, Val) :-
+    Player = Turn,          % MAX node
+    Val > Beta, !.          % prune
+sufficientA(Player, Board, Turn, Moves, Depth, Alpha, Beta,
+            Move, Val, BestMove, BestVal) :-
     new_bounds(Player, Turn, Alpha, Beta, Val, NewAlpha, NewBeta),
-    find_best(Player, Board, Turn, Moves, Depth, NewAlpha, NewBeta, Move1, Val1),
+    find_best(Player, Board, Turn, Moves, Depth, NewAlpha, NewBeta,
+              Move1, Val1),
     better_of(Player, Turn, Move, Val, Move1, Val1, BestMove, BestVal).
 
-% Book move for playerA from the initial position: e2e4
+% PlayerA book move (white plays e2e4 from the initial position)
 bookA(
   [ state(white, WhiteKing, WhiteKingRook, WhiteQueenRook),
     state(black, BlackKing, BlackKingRook, BlackQueenRook),
@@ -279,99 +284,107 @@ collect_movesB(Board, Color, Moves) :-
 /* Chess procedures */
 respond_to(Player, Board, OutBoard) :-
   write('Working...'), nl,
-    % statistics,
   select_move(Player, Board, From, To, Rating),       % Select the next move
-    % statistics,
   finish_move(Player, Board, From, To, Rating,        % Finish the next move
           OutBoard), !.
 
 
-finish_move(Player, Board, From, To, -32000, Board) :-
+finish_move(Player, Board, _From, _To, -32000, Board) :-
   player(Player, Color),
   in_check(Board, Color),
-    opposite(Player, Opponent),
-    opposite(Color, OpponentColor),
+  opposite(Player, Opponent),
+  opposite(Color, OpponentColor),
   write('Checkmate, '),
-    write(Opponent),
-    write(' ('),
-    write(OpponentColor),
-    write(') won.'), nl,
-    print_board(Board),
-    abort.
-finish_move(Player, Board, From, To, -32000, Board) :-
+  write(Opponent),
+  write(' ('),
+  write(OpponentColor),
+  write(') won.'), nl,
+  print_board(Board),
+  abort.
+finish_move(_Player, Board, _From, _To, -32000, Board) :-
   write('Stalemate.'), nl,
   print_board(Board),
-    abort.
+  abort.
 finish_move(Player, NewBoard, From, To, Rating, OutBoard) :-
-    player(Player, Color),
+  player(Player, Color),
   make_move(NewBoard, From, To, OutBoard),
   report_move(Color, OutBoard, From, To, Rating).
 
 
 select_move(Player, Board, From, To, bookA) :-    % Use book for playerA
-    player(Player, white),
+  player(Player, white),
   bookA(Board, From, To), !.
 select_move(Player, Board, From, To, bookB) :-    % Use book for playerB
-    player(Player, black),
-    bookB(Board, From, To), !.
+  player(Player, black),
+  bookB(Board, From, To), !.
 select_move(Player, Board, From, To, Rating) :-    % time for ALPHA-BETA
-    (player(Player, white) -> ply_depthA(Depth);ply_depthB(Depth)),
+  ( player(Player, white) -> ply_depthA(Depth)
+  ; ply_depthB(Depth)
+  ),
   alpha_beta(Player, Board, Player, Depth, -32000, 32000,
-          move(From, To), Rating).
+             move(From, To), Rating).
 
 
-alpha_beta(Player, Board, Turn, 0, Alpha, Beta, BestMove, MoveVal) :-
+alpha_beta(Player, Board, _Turn, 0, _Alpha, _Beta, _BestMove, MoveVal) :-
   player(Player, Color),
   evaluate(Board, Color, MoveVal), !.
 alpha_beta(Player, Board, Turn, Depth, Alpha, Beta, BestMove, MoveVal) :-
-    player(Turn, Color),
-    (player(Player, white) ->
-  (collect_movesA(Board, Color, MoveList) ->     % Turn is the player whose turn is to play
-        find_best(Player, Board, Turn, MoveList, Depth, Alpha, Beta,
-              BestMove, MoveVal);
-     MoveVal is -32000);             % If MoveList is empty, it means end of game or stalemate
-    (collect_movesB(Board, Color, MoveList) ->     % Turn is the player whose turn is to play
-        find_best(Player, Board, Turn, MoveList, Depth, Alpha, Beta,
-              BestMove, MoveVal);
-     MoveVal is -32000)).
+  player(Turn, Color),
+  ( player(Player, white) ->
+      ( collect_movesA(Board, Color, MoveList)
+        -> find_best(Player, Board, Turn, MoveList, Depth, Alpha, Beta,
+                     BestMove, MoveVal)
+        ;  MoveVal is -32000
+      )
+  ;   ( collect_movesB(Board, Color, MoveList)
+        -> find_best(Player, Board, Turn, MoveList, Depth, Alpha, Beta,
+                     BestMove, MoveVal)
+        ;  MoveVal is -32000
+      )
+  ).
 
 
 find_best(Player, Board, Turn, [move(From, To)|Moves], Depth, Alpha, Beta,
-    BestMove, BestVal) :-
+          BestMove, BestVal) :-
   make_move(Board, From, To, NewBoard),
   NextDepth is Depth - 1,
   opposite(Turn, NextTurn),
   alpha_beta(Player, NewBoard, NextTurn, NextDepth, Alpha, Beta, _, Val),
-    (player(Player, white)->
-        sufficientA(Player, Board, Turn, Moves, Depth, Alpha, Beta,
-            move(From,To), Val, BestMove, BestVal);
-        sufficientB(Player, Board, Turn, Moves, Depth, Alpha, Beta,
-            move(From,To), Val, BestMove, BestVal)).
+  ( player(Player, white) ->
+      sufficientA(Player, Board, Turn, Moves, Depth, Alpha, Beta,
+                  move(From,To), Val, BestMove, BestVal)
+  ;   sufficientB(Player, Board, Turn, Moves, Depth, Alpha, Beta,
+                  move(From,To), Val, BestMove, BestVal)
+  ).
 
 
 new_bounds(Player, Turn, Alpha, Beta, Val, Val, Beta) :-
-    Player = Turn,      % Maximizing, keep the larger value
+  Player = Turn,      % Maximizing, keep the larger value
   Val > Alpha, !.
 new_bounds(Player, Turn, Alpha, Beta, Val, Alpha, Val) :-
-    Player \== Turn,        % Minimizing, keep the samller value
+  Player \== Turn,    % Minimizing, keep the smaller value
   Val < Beta, !.
 new_bounds(_, _, Alpha, Beta, _, Alpha, Beta).
 
 
-better_of(Player, Turn, Move, Val, Move1, Val1, Move, Val) :-
-    Player \== Turn,        % Minimizing, the smaller the better
+better_of(Player, Turn, Move, Val, _Move1, Val1, Move, Val) :-
+  Player \== Turn,        % Minimizing, the smaller the better
   Val < Val1, !.
-better_of(Player, Turn, Move, Val, Move1, Val1, Move, Val) :-
-    Player = Turn,    % Maximizing, the greater the better
+better_of(Player, Turn, Move, Val, _Move1, Val1, Move, Val) :-
+  Player = Turn,          % Maximizing, the greater the better
   Val > Val1, !.
-better_of(_, _, _, _, Move1, Val1, Move1, Val1).
+better_of(_, _, _Move, _Val, Move1, Val1, Move1, Val1).
 
 
 evaluate(Board, Color, Rating) :-
-    \+ member(piece(_, Color, king), Board) -> Rating is -32000; % You do not want to lose the king
-    opposite(Color, OppositeColor),
-    (player(playerA, Color)->strengthA(Board, Color, OppositeColor, Rating);
-    strengthB(Board, Color, OppositeColor, Rating)).
+  ( \+ member(piece(_, Color, king), Board)
+    -> Rating is -32000         % You do not want to lose the king
+    ;  opposite(Color, OppositeColor),
+       ( player(playerA, Color)
+         -> strengthA(Board, Color, OppositeColor, Rating)
+         ;  strengthB(Board, Color, OppositeColor, Rating)
+       )
+  ).
 
 
 legal_move(Board, Color, From, To) :-
@@ -390,9 +403,9 @@ make_move(Board, From, To, OutBoard) :-
   make_move(Board, From, To, Color, Type, NewBoard),    
   update_state(NewBoard, From, Color, Type),
   check_castling(NewBoard, From, To, Color, Type, OutBoard).
-make_move([], From, File-8, white, pawn, [piece(File-8, white, queen)]).
-make_move([], From, File-1, black, pawn, [piece(File-1, black, queen)]).
-make_move([], From, To, Color, Type, [piece(To, Color, Type)]).     % Add To sq.
+make_move([], _From, File-8, white, pawn, [piece(File-8, white, queen)]).
+make_move([], _From, File-1, black, pawn, [piece(File-1, black, queen)]).
+make_move([], _From, To, Color, Type, [piece(To, Color, Type)]).     % Add To sq.
 make_move([piece(From, Color, Type)|Board], From, To, Color, Type, OutBoard) :-
   make_move(Board, From, To, Color, Type, OutBoard).          % Skip From
 make_move([piece(To, _, _)|Board], From, To, Color, Type, OutBoard) :-
@@ -401,9 +414,9 @@ make_move([Piece|Board], From, To, Color, Type, [Piece|OutBoard]) :-
   make_move(Board, From, To, Color, Type, OutBoard).      % Copy
 
 
-check_castling(Board, e-Rank, g-Rank, Color, king, OutBoard) :- % King side
+check_castling(Board, e-Rank, g-Rank, _Color, king, OutBoard) :- % King side
   make_move(Board, h-Rank, f-Rank, OutBoard).    % castling
-check_castling(Board, e-Rank, c-Rank, Color, king, OutBoard) :- % Queen side
+check_castling(Board, e-Rank, c-Rank, _Color, king, OutBoard) :- % Queen side
   make_move(Board, a-Rank, d-Rank, OutBoard).    % castling
 check_castling(Board, _, _, _, _, Board).
 
@@ -436,7 +449,7 @@ not_moved(Board, Color, queen, rook) :-
   mymember(state(Color, _, _, QueenRook), Board), !,
   var(QueenRook).
 
-update_state(Board, From, Color, king) :-    % Was king moved?
+update_state(Board, _From, Color, king) :-    % Was king moved?
   mymember(state(Color, king_moved, _, _), Board).
 update_state(Board, h-Rank, Color, rook) :-    % Was king rook moved?
   mymember(state(Color, _, king_rook_moved, _), Board).
@@ -469,67 +482,51 @@ report_move(Color, Board, From_File-From_Rank, To_File-To_Rank, Rating) :-
 
 print_board(Board) :-
     nl,
-    write('   a  b  c  d  e  f  g  h'), nl,
-    write('  -------------------------'), nl,
-    print_ranks(Board, 8),
-    write('  -------------------------'), nl,
-    write('   a  b  c  d  e  f  g  h'), nl,
-    print_state_info(Board),
+    print_separator_line,
+    print_rows(Board, 8),
+    print_file_labels,
     nl.
 
-/* print ranks 8 down to 1 */
-print_ranks(_, 0) :- !.
-print_ranks(Board, Rank) :-
-    write(Rank), write(' '),
-    print_files(Board, Rank, [a,b,c,d,e,f,g,h]),
-    write(' '), write(Rank), nl,
-    Next is Rank - 1,
-    print_ranks(Board, Next).
+print_separator_line :-
+    write('  +----+----+----+----+----+----+----+----+'), nl.
 
-/* print all files in a given rank */
-print_files(_, _, []) :- !.
-print_files(Board, Rank, [File|Rest]) :-
-    print_square(Board, File, Rank),
-    write(' '),
-    print_files(Board, Rank, Rest).
+print_rows(_, 0) :- !.
+print_rows(Board, Rank) :-
+    format(' ~w|', [Rank]),
+    print_row_cells(Board, Rank, [a,b,c,d,e,f,g,h]),
+    print_separator_line,
+    NextRank is Rank - 1,
+    print_rows(Board, NextRank).
 
-/* print one square: piece if present, "." if empty
-   black pieces are shown with a trailing "*" */
-print_square(Board, File, Rank) :-
-    ( mymember(piece(File-Rank, Color, Type), Board)
-    -> piece_symbol(Color, Type, Sym)
-    ;  Sym = '.'
-    ),
-    write(Sym).
+print_row_cells(_, _, []) :-
+    nl.
+print_row_cells(Board, Rank, [File|Rest]) :-
+    square_symbol(Board, File, Rank, Color, Type),
+    cell_representation(Color, Type, Cell),
+    format('~w|', [Cell]),
+    print_row_cells(Board, Rank, Rest).
 
-/* map (Color,Type) -> symbol
-   white: plain letter, black: letter with "*" */
-piece_symbol(white, pawn,   'P').
-piece_symbol(white, rook,   'R').
-piece_symbol(white, knight, 'N').
-piece_symbol(white, bishop, 'B').
-piece_symbol(white, queen,  'Q').
-piece_symbol(white, king,   'K').
+square_symbol(Board, File, Rank, Color, Type) :-
+    mymember(piece(File-Rank, Color, Type), Board), !.
+square_symbol(_, _, _, empty, none).
 
-piece_symbol(black, pawn,   'P*').
-piece_symbol(black, rook,   'R*').
-piece_symbol(black, knight, 'N*').
-piece_symbol(black, bishop, 'B*').
-piece_symbol(black, queen,  'Q*').
-piece_symbol(black, king,   'K*').
+cell_representation(empty, none, '    ').
+cell_representation(white, Type, Cell) :-
+    piece_letter(Type, Letter),
+    format(atom(Cell), '  ~w ', [Letter]).
+cell_representation(black, Type, Cell) :-
+    piece_letter(Type, Letter),
+    format(atom(Cell), ' *~w ', [Letter]).
 
-/* show the two state/4 terms at the bottom */
-print_state_info(Board) :-
-    ( mymember(state(white, WK, WKR, WQR), Board)
-    -> write('White state: '),
-       write(state(white, WK, WKR, WQR)), nl
-    ;  true
-    ),
-    ( mymember(state(black, BK, BKR, BQR), Board)
-    -> write('Black state: '),
-       write(state(black, BK, BKR, BQR)), nl
-    ;  true
-    ).
+piece_letter(pawn,   p).
+piece_letter(rook,   r).
+piece_letter(knight, n).
+piece_letter(bishop, b).
+piece_letter(queen,  q).
+piece_letter(king,   k).
+
+print_file_labels :-
+    write('    a    b    c    d    e    f    g    h'), nl.
 
 /* ----------------------------------------------------------------------- */
 
